@@ -15,7 +15,8 @@ const newPeer = new Peer(undefined, {
     host: '', // Your Heroku app name
     port: '443',
     path: '/peerjs',
-    secure: true
+    secure: true,
+    config: peerConfig
 });
 
 const myVideo = document.createElement('video');
