@@ -3,7 +3,6 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 const express = require("express");
-const app = express();
 const path = require("path");
 const bcrypt = require("bcrypt");
 const passport = require("passport");
@@ -12,63 +11,50 @@ const flash = require("express-flash");
 const session = require("express-session");
 const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
-const User = require('./models/User');
 const nodemailer = require('nodemailer');
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto');
 const { v4: uuidV4 } = require("uuid");
 const http = require("http");
-const socketIo = require("socket.io"); // Import socket.io here
+const socketIo = require("socket.io");
 const { ExpressPeerServer } = require('peer');
+const cookieParser = require('cookie-parser');
+const User = require('./models/User');
+const PendingUser = require('./models/PendingUser');
+
+// Initialize Express
+const app = express();
 
 // Create server and initialize Socket.IO
-const server = http.Server(app);
+const server = http.createServer(app);
 const io = socketIo(server);
-const peerServer = ExpressPeerServer(server, {
-    path: '/peerjs'
-});
-
-
+const peerServer = ExpressPeerServer(server, { path: '/peerjs' });
 
 app.use('/peerjs', peerServer);
-
 app.use(express.static(path.join(__dirname, 'public')));
-const PendingUser = require('./models/PendingUser');
-const cookieParser = require('cookie-parser');
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 app.use(cookieParser());
 app.set('view engine', 'ejs');
 
-// Socket.IO connection handling
-io.on('connection', socket => {
-    console.log('A user connected');
+// Initialize session
+app.use(session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false
+}));
 
-    socket.on('join-room', (roomId, userId) => {
-        console.log(`User ${userId} joined room ${roomId}`);
-        socket.join(roomId);
-        socket.to(roomId).emit('user-connected', userId);
+app.use(passport.initialize());
+app.use(passport.session());
+app.use(flash());
 
-
-        socket.on('disconnect', () => {
-            socket.to(roomId).broadcast.emit('user-disconnected', userId )
-        })
-    });
-});
-
-// Nodemailer transporter setup
-const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: {
-        user: 'pantsbro4@gmail.com', // Replace with your email
-        pass: 'tpxy ymac aupu ktow'   // Replace with your password
-    },
-    tls: {
-        rejectUnauthorized: false
-    }
-});
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 30000
+})
+.then(() => console.log('Connected to MongoDB'))
+.catch(err => console.error('MongoDB connection error:', err));
 
 // Initialize Passport
 function initialize(passport) {
@@ -89,9 +75,7 @@ function initialize(passport) {
     };
 
     passport.use(new LocalStrategy({ usernameField: 'email' }, authenticateUser));
-    passport.serializeUser((user, done) => {
-        done(null, user.id);
-    });
+    passport.serializeUser((user, done) => done(null, user.id));
     passport.deserializeUser(async (id, done) => {
         try {
             const user = await User.findById(id);
@@ -104,34 +88,34 @@ function initialize(passport) {
 
 initialize(passport);
 
-mongoose.connect('mongodb+srv://kingcod163:Saggytits101@cluster0.rcyom.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', {
-    serverSelectionTimeoutMS: 30000
-})
-.then(() => console.log('Connected to MongoDB'))
-.catch(err => console.error('MongoDB connection error:', err));
+// Socket.IO connection handling
+io.on('connection', socket => {
+    console.log('A user connected');
 
-app.use(flash());
-app.use(session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false
-}));
-app.use(passport.initialize());
-app.use(passport.session());
+    socket.on('join-room', (roomId, userId) => {
+        console.log(`User ${userId} joined room ${roomId}`);
+        socket.join(roomId);
+        socket.to(roomId).emit('user-connected', userId);
 
-function checkAuthenticated(req, res, next) {
-    if (req.isAuthenticated()) {
-        return next();
+        socket.on('disconnect', () => {
+            socket.to(roomId).emit('user-disconnected', userId);
+        });
+    });
+});
+
+// Nodemailer transporter setup
+const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: {
+        user: process.env.EMAIL_USER, // Use environment variables
+        pass: process.env.EMAIL_PASS  // Use environment variables
+    },
+    tls: {
+        rejectUnauthorized: false
     }
-    res.redirect('/login');
-}
-
-function checkNotAuthenticated(req, res, next) {
-    if (req.isAuthenticated()) {
-        return res.redirect('/home');
-    }
-    next();
-}
+});
 
 // Register route
 app.post("/register", [
@@ -171,7 +155,7 @@ app.post("/register", [
 
         res.status(201).send('User registered. Please check your email to confirm.');
     } catch (e) {
-        console.log(e);
+        console.error(e);
         res.status(500).send('Server error');
     }
 });
@@ -188,7 +172,7 @@ app.get('/confirmation/:token', async (req, res) => {
         }
 
         const newUser = new User({
-            name: pendingUser.username,
+            username: pendingUser.username,
             email: pendingUser.email,
             password: pendingUser.password,
             isConfirmed: true
@@ -199,18 +183,18 @@ app.get('/confirmation/:token', async (req, res) => {
 
         res.send('Email confirmed. You can now log in.');
     } catch (e) {
-        console.log(e);
+        console.error(e);
         res.status(500).send('Server error');
     }
 });
 
 // Login route
-app.get('/login', checkNotAuthenticated, (req, res) => {
+app.get('/login', (req, res) => {
     res.render("login.ejs");
 });
 
 // Handle login with verification
-app.post("/login", async (req, res, next) => {
+app.post("/login", (req, res, next) => {
     passport.authenticate('local', async (err, user, info) => {
         if (err) {
             return next(err);
@@ -223,13 +207,9 @@ app.post("/login", async (req, res, next) => {
                 return next(err);
             }
 
-            // Generate a random verification code
             const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-            // Store verification code in session
             req.session.verificationCode = verificationCode;
 
-            // Send the verification code via email
             await transporter.sendMail({
                 to: user.email,
                 subject: 'Your Verification Code',
@@ -274,7 +254,7 @@ app.get('/:room', (req, res) => {
 });
 
 // Registration route
-app.get('/register', checkNotAuthenticated, (req, res) => {
+app.get('/register', (req, res) => {
     res.render("register.ejs");
 });
 
