@@ -42,7 +42,7 @@ app.set('view engine', 'ejs');
 
 // Socket.IO connection handling
 io.on('connection', socket => {
-    console.log('A user connected');
+    console.log('A user connectedasd');
 
     socket.on('join-room', (roomId, userId) => {
         console.log(`User ${userId} joined room ${roomId}`);
