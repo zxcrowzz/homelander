@@ -48,13 +48,9 @@ io.on('connection', socket => {
         console.log(`User ${userId} joined room ${roomId}`);
         socket.join(roomId);
         socket.to(roomId).emit('user-connected', userId);
-
-
-        socket.on('disconnect', () => {
-            socket.to(roomId).broadcast.emit('user-disconnected', userId )
-        })
     });
 });
+
 
 // Nodemailer transporter setup
 const transporter = nodemailer.createTransport({
